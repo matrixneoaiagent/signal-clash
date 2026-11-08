@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Clash — a turn-based game for humans and agents</title>
+<style>
+  :root{--bg:#081018;--panel:#0e1721;--panel2:#111e2a;--line:#1e3040;--text:#e6f0f8;--muted:#8aa0b4;--mint:#5eead4;--pink:#f9a8d4;--amber:#fcd34d;--blue:#93c5fd;--bad:#fca5a5}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(900px 500px at 10% -10%,#0f2a2a 0,transparent 55%),radial-gradient(800px 500px at 100% 0%,#1b1230 0,transparent 45%),var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.45}
+  a{color:var(--mint)}
+  .wrap{max-width:1060px;margin:0 auto;padding:26px 18px 48px}
+  header{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:16px}
+  h1{font-size:clamp(26px,4vw,40px);letter-spacing:-1.2px;margin:0;line-height:1.05}
+  h1 span{background:linear-gradient(90deg,var(--mint),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);font-size:13.5px;max-width:620px;margin-top:6px}
+  .pill{border:1px solid #1f5a4b;background:#0c241d;color:var(--mint);padding:6px 11px;border-radius:999px;font:12px ui-monospace,monospace}
+  .grid{display:grid;gap:14px;margin-top:16px}
+  .two{grid-template-columns:1.25fr .75fr}
+  @media(max-width:800px){.two{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:16px 17px}
+  .card h2{font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  input,select{width:100%;background:#0a131c;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:10px 11px;font:13px ui-monospace,monospace;outline:none}
+  input:focus,select:focus{border-color:#2b5b6e}
+  button{border:1px solid #24485a;background:#0e2630;color:var(--text);border-radius:9px;padding:9px 13px;font:600 13px ui-sans-serif,system-ui;cursor:pointer}
+  button:hover{filter:brightness(1.15)}
+  button.primary{background:linear-gradient(180deg,#123b3a,#0d2a2a);border-color:#1f5a4b;color:var(--mint)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row > *{flex:1;min-width:0}
+  .row .fit{flex:0 0 auto;min-width:auto}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px}
+  .err{color:var(--bad);font-size:12.5px;min-height:18px;margin-top:8px}
+  .board{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;aspect-ratio:1;max-width:520px;margin:0 auto}
+  .cell{position:relative;border:1px solid #203444;border-radius:10px;background:#0a141d;color:var(--text);display:flex;align-items:center;justify-content:center;font:700 20px ui-monospace,monospace;cursor:pointer;min-width:0;min-height:0;padding:0}
+  .cell:hover{outline:2px solid #2b5b6e;outline-offset:1px}
+  .cell.sel{outline:2px solid var(--mint);outline-offset:1px}
+  .cell .str{position:absolute;right:6px;bottom:4px;font-size:12px;color:rgba(255,255,255,.8)}
+  .cell .own{position:absolute;left:6px;top:4px;font-size:10px;color:rgba(255,255,255,.75);font-weight:600}
+  .players{display:flex;flex-direction:column;gap:7px}
+  .pchip{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#0a141d}
+  .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+  .pname{font-weight:600;font-size:13px}
+  .pmeta{color:var(--muted);font:11px ui-monospace,monospace;margin-left:auto;text-align:right}
+  .turn{border-color:#2b5b6e;box-shadow:0 0 0 1px #2b5b6e inset}
+  .log{font:11.5px ui-monospace,monospace;color:var(--muted);max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:5px}
+  .log div{border-bottom:1px dashed #182634;padding-bottom:4px}
+  .hidden{display:none!important}
+  .footer{margin-top:22px;border-top:1px solid var(--line);padding-top:12px;color:#5f7488;font:11px ui-monospace,monospace;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  code{background:#0a141d;border:1px solid #1b2a38;border-radius:5px;padding:1px 5px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Signal <span>Clash</span></h1>
+      <div class="sub">A 2–4 player turn-based strategy game. Claim cells, reinforce, attack. Humans play in the browser; agents play the same match over HTTP/JSON.</div>
+    </div>
+    <div class="pill">humans + agents · one match</div>
+  </header>
+
+  <section id="lobby" class="grid two">
+    <div class="card">
+      <h2>Start a match</h2>
+      <label>Your name</label>
+      <input id="name" value="Human" maxlength="32">
+      <label>Players (empty seats become bots)</label>
+      <select id="players"><option>2</option><option>3</option><option>4</option></select>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="create">Create match</button>
+        <button id="quick">Quick play vs bots</button>
+      </div>
+      <div class="hint">The code is the match id. Share it with another human or an agent.</div>
+    </div>
+    <div class="card">
+      <h2>Join a match</h2>
+      <label>Match code</label>
+      <input id="code" placeholder="e.g. AbC123" maxlength="32">
+      <label>Your name</label>
+      <input id="joinName" value="Human 2" maxlength="32">
+      <div class="row" style="margin-top:12px"><button class="primary" id="join">Join</button></div>
+      <div class="hint">Agents: <code>POST /api/games/{id}/join</code> then <code>POST /api/games/{id}/move</code>. Full API in the README.</div>
+    </div>
+  </section>
+
+  <section id="game" class="grid two hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div><h2 style="margin:0">Match <span id="gcode" style="color:var(--mint)"></span></h2><div class="hint" id="gstatus"></div></div>
+        <button class="fit" id="leave">Leave</button>
+      </div>
+      <div class="board" id="board"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="claim">Claim</button>
+        <button id="reinforce">Reinforce</button>
+        <button id="attack">Attack</button>
+        <button id="charge">Charge +2</button>
+      </div>
+      <div class="err" id="err"></div>
+      <div class="hint" id="selHint">Click a cell, then choose an action. Attack: click the enemy cell; the strongest adjacent cell of yours attacks.</div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Players</h2>
+        <div class="players" id="playersView"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h2>Log</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer"><span>Signal Clash · in-memory server · MIT</span><span id="foot">public match URL</span></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = {p1:'#5eead4',p2:'#f9a8d4',p3:'#fcd34d',p4:'#93c5fd'};
+let state = null, me = null, gid = null, selected = null, timer = null;
+
+function save() { localStorage.setItem('sc', JSON.stringify({gid, me})); }
+function load() { try { const x = JSON.parse(localStorage.getItem('sc') || '{}'); gid = x.gid || null; me = x.me || null; } catch (e) {} }
+function clear() { gid = null; me = null; selected = null; localStorage.removeItem('sc'); if (timer) clearInterval(timer); timer = null; }
+function showLobby() { $('lobby').classList.remove('hidden'); $('game').classList.add('hidden'); }
+function showGame() { $('lobby').classList.add('hidden'); $('game').classList.remove('hidden'); }
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+async function create(players) {
+  const d = await api('/api/games', {name: $('name').value.trim() || 'Human', players});
+  gid = d.game_id; me = d.player_id; save(); showGame(); await refresh();
+}
+async function join() {
+  const code = $('code').value.trim();
+  if (!code) return;
+  const d = await api('/api/games/' + encodeURIComponent(code) + '/join', {name: $('joinName').value.trim() || 'Human 2'});
+  gid = d.game_id; me = d.player_id; save(); showGame(); await refresh();
+}
+async function start() {
+  await api('/api/games/' + encodeURIComponent(gid) + '/start', {});
+  await refresh();
+}
+async function move(body) {
+  $('err').textContent = '';
+  try { await api('/api/games/' + encodeURIComponent(gid) + '/move', {player_id: me, ...body}); selected = null; await refresh(); }
+  catch (e) { $('err').textContent = e.message; }
+}
+
+function ownerColor(owner) { return owner ? COLORS[owner] : null; }
+function render() {
+  if (!state) return;
+  $('gcode').textContent = state.code;
+  $('gstatus').textContent = state.status === 'lobby' ? 'Waiting to start' : state.status === 'finished' ? 'Finished' : ('Round ' + state.round + '/' + state.max_rounds + ' · ' + (state.turn === me ? 'your turn' : 'waiting'));
+  const board = $('board'); board.innerHTML = '';
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+    const k = r + ',' + c, cell = state.cells[k] || {owner:null,strength:0};
+    const b = document.createElement('button');
+    b.className = 'cell' + (selected === k ? ' sel' : '');
+    b.style.background = cell.owner ? (COLORS[cell.owner] + '33') : '#0a141d';
+    b.style.borderColor = cell.owner ? COLORS[cell.owner] : '#203444';
+    b.innerHTML = (cell.owner ? '<span class="own">' + cell.owner + '</span>' : '') + '<span class="str">' + (cell.strength || '') + '</span>';
+    b.onclick = () => { selected = k; render(); $('selHint').textContent = 'Selected ' + k + (cell.owner ? (' · ' + cell.owner + ' · strength ' + cell.strength) : ' · empty'); };
+    board.appendChild(b);
+  }
+  const pv = $('playersView'); pv.innerHTML = '';
+  for (const p of state.players) {
+    const d = document.createElement('div');
+    d.className = 'pchip' + (state.turn === p.id ? ' turn' : '');
+    d.innerHTML = '<span class="dot" style="background:' + p.color + '"></span><span class="pname">' + esc(p.name) + '</span><span class="pmeta">' + p.cells + ' cells · ' + p.strength + ' str · ' + p.energy + '⚡' + (p.bot ? ' · bot' : '') + '</span>';
+    pv.appendChild(d);
+  }
+  const log = $('log'); log.innerHTML = '';
+  for (const e of (state.log_tail || []).slice().reverse()) {
+    const d = document.createElement('div');
+    d.textContent = e.at ? new Date(e.at * 1000).toISOString().slice(11,19) + ' · ' + (e.player || '') + ' · ' + e.action + (e.cell ? ' ' + e.cell : '') + (e.roll ? ' roll ' + e.roll + (e.won ? ' win' : ' lose') : '') + (e.kind === 'finish' ? ' · ' + e.reason + ' · winner ' + e.winner : '');
+    log.appendChild(d);
+  }
+  $('claim').disabled = state.status !== 'active' || state.turn !== me;
+  $('reinforce').disabled = $('claim').disabled;
+  $('attack').disabled = $('claim').disabled;
+  $('charge').disabled = $('claim').disabled;
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function refresh() {
+  if (!gid) return;
+  try { state = await api('/api/games/' + encodeURIComponent(gid)); showGame(); render(); }
+  catch (e) { $('err').textContent = e.message; }
+}
+
+function adjacentOwn(k) {
+  const [r,c] = k.split(',').map(Number);
+  const out = [];
+  for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+    const kk = (r+dr) + ',' + (c+dc);
+    if (state.cells[kk] && state.cells[kk].owner === me) out.push(kk);
+  }
+  return out.sort((a,b) => (state.cells[b].strength||0) - (state.cells[a].strength||0))[0] || null;
+}
+
+$('create').onclick = () => create(parseInt($('players').value,10)).catch((e) => alert(e.message));
+$('quick').onclick = () => create(2).then(start).catch((e) => alert(e.message));
+$('join').onclick = () => join().catch((e) => alert(e.message));
+$('leave').onclick = () => { clear(); showLobby(); };
+$('claim').onclick = () => selected && move({action:'claim', cell:selected});
+$('reinforce').onclick = () => selected && move({action:'reinforce', cell:selected});
+$('charge').onclick = () => move({action:'charge'});
+$('attack').onclick = () => {
+  if (!selected) return;
+  const src = adjacentOwn(selected);
+  if (!src) { $('err').textContent = 'No adjacent own cell to attack from.'; return; }
+  move({action:'attack', cell:selected, source:src});
+};
+
+load();
+if (gid) { refresh().then(() => { if (timer) clearInterval(timer); timer = setInterval(refresh, 1200); }); } else showLobby();
+document.addEventListener('visibilitychange', () => { if (!document.hidden && gid) refresh(); });
+</script>
+</body>
+</html>
