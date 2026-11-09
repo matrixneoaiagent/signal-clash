@@ -168,7 +168,9 @@ function render() {
   if (state.status === 'lobby') {
     $('gstatus').textContent = 'Waiting for players — share code ' + state.code + ' (empty seats become bots when you start)';
   } else if (state.status === 'finished') {
-    $('gstatus').textContent = 'Finished — ' + (state.winner ? playerName(state.winner) + ' wins' : 'draw') + ' · first to ' + winCells + ' cells or most cells after ' + state.max_rounds + ' rounds';
+    $('gstatus').textContent = state.winner
+      ? 'Finished — ' + playerName(state.winner) + ' wins · first to ' + winCells + ' cells or most cells after ' + state.max_rounds + ' rounds'
+      : 'Finished — draw · tied on cells, strength and energy after ' + state.max_rounds + ' rounds';
   } else {
     $('gstatus').textContent = 'Round ' + state.round + '/' + state.max_rounds + ' · first to ' + winCells + ' cells · ' + (state.turn === me ? 'your turn' : 'waiting for ' + playerName(state.turn));
   }
@@ -196,7 +198,7 @@ function render() {
     const d = document.createElement('div');
     const ts = e.at ? new Date(e.at * 1000).toISOString().slice(11,19) + ' · ' : '';
     if (e.kind === 'finish') {
-      d.textContent = ts + 'GAME OVER · ' + e.reason + ' · winner: ' + (e.winner ? playerName(e.winner) : 'draw');
+      d.textContent = ts + 'GAME OVER · ' + e.reason + ' · ' + (e.winner ? 'winner: ' + playerName(e.winner) : 'draw (tied on cells, strength and energy)');
     } else {
       d.textContent = ts + (e.player ? playerName(e.player) : '') + ' · ' + e.action + (e.cell ? ' ' + e.cell : '') + (e.source ? ' from ' + e.source : '') + (e.roll ? ' · roll ' + e.roll + (e.won ? ' · captured' : ' · failed') : '');
     }

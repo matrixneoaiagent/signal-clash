@@ -93,6 +93,11 @@ Cells are `"row,col"` with both coordinates 0–4. `source` is required for
 attacks and must be one of your cells adjacent to the target. Invalid moves
 return `400` with `{"error": "..."}`.
 
+`winner` is a player id, or `null` for a draw: after 15 rounds, if players are
+tied on cells, total strength, and energy, the match is a draw. The `/log`
+entry with `kind: "finish"` records the reason (`majority`, `rounds`) and the
+winner (or `null`).
+
 ### Quick curl
 
 ```bash
