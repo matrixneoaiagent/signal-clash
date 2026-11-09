@@ -8,6 +8,7 @@ browser; agents use the JSON API. State is in memory; run one process.
 from __future__ import annotations
 
 import json
+import os
 import random
 import secrets
 import threading
@@ -18,8 +19,9 @@ from urllib.parse import urlparse, parse_qs
 
 ROOT = Path(__file__).resolve().parent
 HOST = "0.0.0.0"
-PORT = 8080
+PORT = int(os.environ.get("PORT", "8080"))
 MAX_ROUNDS = 15
+WIN_CELLS = 10
 MAX_ENERGY = 5
 COLORS = ["#5eead4", "#f9a8d4", "#fcd34d", "#93c5fd"]
 BOT_NAMES = ["Bot Aurora", "Bot Basalt", "Bot Cinder"]
@@ -53,6 +55,18 @@ def adjacent(a: str, b: str) -> bool:
     if not pa or not pb:
         return False
     return abs(pa[0] - pb[0]) + abs(pa[1] - pb[1]) == 1
+
+
+def empty_board() -> dict[str, dict]:
+    """All 25 cells exist from turn one; empty cells have no owner and 0 strength."""
+    return {cell_key(r, c): {"owner": None, "strength": 0} for r in range(5) for c in range(5)}
+
+
+def ensure_board(game: dict) -> None:
+    """Backfill missing cells (keeps games created by older versions playable)."""
+    for r in range(5):
+        for c in range(5):
+            game["cells"].setdefault(cell_key(r, c), {"owner": None, "strength": 0})
 
 
 def owned_cells(game: dict, pid: str) -> list[str]:
@@ -121,16 +135,20 @@ def auto_bot_move(game: dict):
 
 def finish(game: dict, reason: str):
     game["status"] = "finished"
-    game["winner"] = None
-    best = None
+    if reason == "rounds":
+        game["round"] = MAX_ROUNDS
+    best_score = None
+    leaders = []
     for p in game["players"]:
         cells = owned_cells(game, p["id"])
         strength = sum(game["cells"][k]["strength"] for k in cells)
         score = (len(cells), strength, p["energy"])
-        if best is None or score > best[0]:
-            best = (score, p)
-    if best:
-        game["winner"] = best[1]["id"]
+        if best_score is None or score > best_score:
+            best_score, leaders = score, [p]
+        elif score == best_score:
+            leaders.append(p)
+    # A genuine tie after cells, strength and energy is a draw.
+    game["winner"] = leaders[0]["id"] if len(leaders) == 1 else None
     game["log"].append({"at": int(time.time()), "kind": "finish", "reason": reason, "winner": game["winner"]})
 
 
@@ -192,10 +210,10 @@ def apply_move(game: dict, pid: str, action: str, cell: str | None, source: str 
     else:
         raise ValueError("unknown action")
 
-    # Win check: majority of the 25 cells, or every opponent has no cells.
+    # Win check: control WIN_CELLS of the 25 cells, or every opponent has no cells.
     my_cells = len(owned_cells(game, pid))
     opponents = [x for x in game["players"] if x["id"] != pid]
-    if my_cells >= 13 or all(len(owned_cells(game, x["id"])) == 0 for x in opponents):
+    if my_cells >= WIN_CELLS or all(len(owned_cells(game, x["id"])) == 0 for x in opponents):
         finish(game, "majority")
         return snapshot(game)
     # Advance past eliminated players; the round rolls over when turn 0 is reached.
@@ -223,6 +241,7 @@ def snapshot(game: dict):
         "status": game["status"],
         "round": game["round"],
         "max_rounds": MAX_ROUNDS,
+        "win_cells": WIN_CELLS,
         "turn": current(game)["id"] if game["status"] == "active" else None,
         "players": [
             {
@@ -293,22 +312,49 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 4 and parts[3] == "legal":
                 qs = parse_qs(urlparse(self.path).query)
                 pid = (qs.get("player_id") or [""])[0]
-                self._send(200, {"moves": legal_moves(game, pid)})
+                if not pid:
+                    self._send(400, {"error": "player_id query parameter is required"})
+                    return
+                if not player(game, pid):
+                    self._send(404, {"error": "unknown player"})
+                    return
+                self._send(200, {
+                    "moves": legal_moves(game, pid),
+                    "status": game["status"],
+                    "turn": current(game)["id"] if game["status"] == "active" else None,
+                    "win_cells": WIN_CELLS,
+                })
                 return
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        try:
+            self._post()
+        except Exception as exc:  # keep the API JSON even on an unexpected bug
+            print(f"POST {self.path} failed: {exc!r}")
+            self._send(500, {"error": "internal server error"})
+
+    def _post(self):
         path = urlparse(self.path).path
         body = self._body()
         with LOCK:
+            if not isinstance(body, dict):
+                self._send(400, {"error": "body must be a JSON object"})
+                return
             if path == "/api/games":
-                players = int(body.get("players", 2))
+                try:
+                    players = int(body.get("players", 2))
+                except (TypeError, ValueError):
+                    self._send(400, {"error": "players must be 2, 3, or 4"})
+                    return
                 players = max(2, min(4, players))
                 name = str(body.get("name") or "Player")[:32]
                 gid = secrets.token_urlsafe(6)
                 code = gid
                 colors = COLORS[:players]
                 starts = START[players]
+                cells = empty_board()
+                cells[cell_key(*starts[0])] = {"owner": "p1", "strength": 1}
                 game = {
                     "id": gid,
                     "code": code,
@@ -319,7 +365,7 @@ class Handler(BaseHTTPRequestHandler):
                     "players": [
                         {"id": "p1", "name": name, "color": colors[0], "energy": 3, "bot": False}
                     ],
-                    "cells": {cell_key(*starts[0]): {"owner": "p1", "strength": 1}},
+                    "cells": cells,
                     "log": [],
                     "winner": None,
                 }
@@ -338,6 +384,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(game["players"]) >= game["max_players"]:
                     self._send(400, {"error": "game is full"})
                     return
+                ensure_board(game)
                 pid = f"p{len(game['players']) + 1}"
                 color = COLORS[len(game["players"])]
                 start = START[game["max_players"]][len(game["players"])]
@@ -354,11 +401,14 @@ class Handler(BaseHTTPRequestHandler):
                 if game["status"] != "lobby":
                     self._send(400, {"error": "game already started"})
                     return
+                ensure_board(game)
                 while len(game["players"]) < game["max_players"]:
                     pid = f"p{len(game['players']) + 1}"
                     color = COLORS[len(game["players"])]
                     start = START[game["max_players"]][len(game["players"])]
-                    game["players"].append({"id": pid, "name": BOT_NAMES[len(game["players"]) - 1], "color": color, "energy": 3, "bot": True})
+                    used = {p["name"] for p in game["players"]}
+                    bot_name = next((n for n in BOT_NAMES if n not in used), f"Bot {pid.upper()}")
+                    game["players"].append({"id": pid, "name": bot_name, "color": color, "energy": 3, "bot": True})
                     game["cells"][cell_key(*start)] = {"owner": pid, "strength": 1}
                 for p in game["players"]:
                     if not owned_cells(game, p["id"]):

@@ -54,8 +54,15 @@ def main() -> int:
         print(f"created {game_id}; play at {base}/ (code {game_id})")
 
     print(f"playing as {player_id} in {game_id}")
+    waiting_printed = False
     for _ in range(500):
         s = requests.get(f"{base}/api/games/{game_id}", timeout=20).json()
+        if s.get("status") == "lobby":
+            if not waiting_printed:
+                print("joined; waiting for the match to start")
+                waiting_printed = True
+            time.sleep(0.5)
+            continue
         if s.get("status") != "active":
             print("finished; winner:", s.get("winner"))
             return 0

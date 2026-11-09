@@ -57,6 +57,7 @@
     <div>
       <h1>Signal <span>Clash</span></h1>
       <div class="sub">A 2–4 player turn-based strategy game. Claim cells, reinforce, attack. Humans play in the browser; agents play the same match over HTTP/JSON.</div>
+      <div class="hint">One action per turn: Claim 1⚡ · Reinforce 1⚡ · Attack 2⚡ · Charge +2⚡ (max 5). First to 10 cells wins; otherwise most cells after 15 rounds.</div>
     </div>
     <div class="pill">humans + agents · one match</div>
   </header>
@@ -90,6 +91,9 @@
       <div class="row" style="justify-content:space-between;align-items:center">
         <div><h2 style="margin:0">Match <span id="gcode" style="color:var(--mint)"></span></h2><div class="hint" id="gstatus"></div></div>
         <button class="fit" id="leave">Leave</button>
+      </div>
+      <div class="row" id="startRow" style="margin-top:10px">
+        <button class="primary" id="start">Start match — fill empty seats with bots</button>
       </div>
       <div class="board" id="board"></div>
       <div class="row" style="margin-top:12px">
@@ -126,6 +130,7 @@ function load() { try { const x = JSON.parse(localStorage.getItem('sc') || '{}')
 function clear() { gid = null; me = null; selected = null; localStorage.removeItem('sc'); if (timer) clearInterval(timer); timer = null; }
 function showLobby() { $('lobby').classList.remove('hidden'); $('game').classList.add('hidden'); }
 function showGame() { $('lobby').classList.add('hidden'); $('game').classList.remove('hidden'); }
+function startPolling() { if (timer) clearInterval(timer); timer = gid ? setInterval(refresh, 1200) : null; }
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
@@ -136,13 +141,13 @@ async function api(path, body) {
 
 async function create(players) {
   const d = await api('/api/games', {name: $('name').value.trim() || 'Human', players});
-  gid = d.game_id; me = d.player_id; save(); showGame(); await refresh();
+  gid = d.game_id; me = d.player_id; save(); showGame(); startPolling(); await refresh();
 }
 async function join() {
   const code = $('code').value.trim();
   if (!code) return;
   const d = await api('/api/games/' + encodeURIComponent(code) + '/join', {name: $('joinName').value.trim() || 'Human 2'});
-  gid = d.game_id; me = d.player_id; save(); showGame(); await refresh();
+  gid = d.game_id; me = d.player_id; save(); showGame(); startPolling(); await refresh();
 }
 async function start() {
   await api('/api/games/' + encodeURIComponent(gid) + '/start', {});
@@ -155,10 +160,19 @@ async function move(body) {
 }
 
 function ownerColor(owner) { return owner ? COLORS[owner] : null; }
+function playerName(id) { const p = (state.players || []).find((x) => x.id === id); return p ? p.name : id; }
 function render() {
   if (!state) return;
   $('gcode').textContent = state.code;
-  $('gstatus').textContent = state.status === 'lobby' ? 'Waiting to start' : state.status === 'finished' ? 'Finished' : ('Round ' + state.round + '/' + state.max_rounds + ' · ' + (state.turn === me ? 'your turn' : 'waiting'));
+  const winCells = state.win_cells || 10;
+  if (state.status === 'lobby') {
+    $('gstatus').textContent = 'Waiting for players — share code ' + state.code + ' (empty seats become bots when you start)';
+  } else if (state.status === 'finished') {
+    $('gstatus').textContent = 'Finished — ' + (state.winner ? playerName(state.winner) + ' wins' : 'draw') + ' · first to ' + winCells + ' cells or most cells after ' + state.max_rounds + ' rounds';
+  } else {
+    $('gstatus').textContent = 'Round ' + state.round + '/' + state.max_rounds + ' · first to ' + winCells + ' cells · ' + (state.turn === me ? 'your turn' : 'waiting for ' + playerName(state.turn));
+  }
+  $('startRow').classList.toggle('hidden', state.status !== 'lobby');
   const board = $('board'); board.innerHTML = '';
   for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
     const k = r + ',' + c, cell = state.cells[k] || {owner:null,strength:0};
@@ -180,7 +194,12 @@ function render() {
   const log = $('log'); log.innerHTML = '';
   for (const e of (state.log_tail || []).slice().reverse()) {
     const d = document.createElement('div');
-    d.textContent = e.at ? new Date(e.at * 1000).toISOString().slice(11,19) + ' · ' + (e.player || '') + ' · ' + e.action + (e.cell ? ' ' + e.cell : '') + (e.roll ? ' roll ' + e.roll + (e.won ? ' win' : ' lose') : '') + (e.kind === 'finish' ? ' · ' + e.reason + ' · winner ' + e.winner : '');
+    const ts = e.at ? new Date(e.at * 1000).toISOString().slice(11,19) + ' · ' : '';
+    if (e.kind === 'finish') {
+      d.textContent = ts + 'GAME OVER · ' + e.reason + ' · winner: ' + (e.winner ? playerName(e.winner) : 'draw');
+    } else {
+      d.textContent = ts + (e.player ? playerName(e.player) : '') + ' · ' + e.action + (e.cell ? ' ' + e.cell : '') + (e.source ? ' from ' + e.source : '') + (e.roll ? ' · roll ' + e.roll + (e.won ? ' · captured' : ' · failed') : '');
+    }
     log.appendChild(d);
   }
   $('claim').disabled = state.status !== 'active' || state.turn !== me;
@@ -192,8 +211,14 @@ function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':
 
 async function refresh() {
   if (!gid) return;
-  try { state = await api('/api/games/' + encodeURIComponent(gid)); showGame(); render(); }
-  catch (e) { $('err').textContent = e.message; }
+  try {
+    state = await api('/api/games/' + encodeURIComponent(gid));
+    showGame(); render();
+    if (state.status === 'finished' && timer) { clearInterval(timer); timer = null; }
+  } catch (e) {
+    $('err').textContent = e.message;
+    if (e.message === 'game not found') { clear(); showLobby(); }
+  }
 }
 
 function adjacentOwn(k) {
@@ -209,6 +234,7 @@ function adjacentOwn(k) {
 $('create').onclick = () => create(parseInt($('players').value,10)).catch((e) => alert(e.message));
 $('quick').onclick = () => create(2).then(start).catch((e) => alert(e.message));
 $('join').onclick = () => join().catch((e) => alert(e.message));
+$('start').onclick = () => start().catch((e) => alert(e.message));
 $('leave').onclick = () => { clear(); showLobby(); };
 $('claim').onclick = () => selected && move({action:'claim', cell:selected});
 $('reinforce').onclick = () => selected && move({action:'reinforce', cell:selected});
@@ -221,7 +247,7 @@ $('attack').onclick = () => {
 };
 
 load();
-if (gid) { refresh().then(() => { if (timer) clearInterval(timer); timer = setInterval(refresh, 1200); }); } else showLobby();
+if (gid) { showGame(); startPolling(); refresh(); } else showLobby();
 document.addEventListener('visibilitychange', () => { if (!document.hidden && gid) refresh(); });
 </script>
 </body>
